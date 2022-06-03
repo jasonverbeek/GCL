@@ -4,6 +4,10 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>GameCheatLibrary by localhost8080.org</Description>
+    <Copyright>localhost8080.org</Copyright>
+    <NeutralLanguage>en</NeutralLanguage>
+    <PlatformTarget>AnyCPU</PlatformTarget>
   </PropertyGroup>
 
 </Project>

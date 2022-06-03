@@ -1,100 +1,82 @@
 ﻿using System;
 using System.Threading;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 
-namespace LHGameHack
+namespace GCL
 {
 
     public class MemoryPointer
     {
         [DllImport("kernel32.dll")]
-        public static extern bool ReadProcessMemory(int hProcess, int lpBaseAddress, byte[] lpBuffer, int dwSize, ref int lpNumberOfBytesRead);
+        private static extern bool ReadProcessMemory(int hProcess, Int64 lpBaseAddress, byte[] lpBuffer, int dwSize, ref int lpNumberOfBytesRead);
 
         [DllImport("kernel32.dll")]
-        public static extern bool WriteProcessMemory(int hProcess, int lpBaseAddress, byte[] buffer, int size, int lpNumberOfBytesWritten);
+        private static extern bool WriteProcessMemory(int hProcess, Int64 lpBaseAddress, byte[] buffer, int size, int lpNumberOfBytesWritten);
 
-        public string pointerName;
-        public int baseAddress;
+        public long baseAddress;
         public int[] offsets;
 
-        private GameProcess gp;
-        private bool frozen;
-        private byte[] frozenValue;
-        private Thread? freezeThread;
+        public readonly GameModule gm;
 
-        public MemoryPointer(string pointerName, int baseAddress, int[] offsets, GameProcess gp)
+        public MemoryPointer(long baseAddress, int[] offsets, GameModule gm)
         {
-            this.pointerName = pointerName;
             this.baseAddress = baseAddress;
             this.offsets = offsets;
-            this.frozen = false;
-            this.frozenValue = new byte[4];
-            this.gp = gp;
+            this.gm = gm;
         }
 
-        public void Freeze()
+        public long ToAddress()
         {
-            int address = this.ToAddress();
-            this.Freeze(this.ReadBytes(address));
+            return this.ToAddress(false);
         }
 
-        public void Freeze(byte[] value)
+        public long ToAddress(bool debug)
         {
-            if (this.freezeThread != null)
-                return;
-            this.frozenValue = value;
-            this.frozen = true;
-        }
-
-        public void Thaw()
-        {
-            if (this.freezeThread == null)
-                return;
-            this.frozen = false;
-        }
-
-        public int ToAddress()
-        {
-            int address = this.ReadAddress(this.gp.baseAddress + this.baseAddress);
-            Console.WriteLine(this.gp.baseAddress.ToString("X") + " + " + this.baseAddress.ToString("X") + " = " + address.ToString("X"));
-            int addressBefore = address;
+            long address = this.ReadAddress(this.gm.baseAddress + this.baseAddress);
+            if (debug)
+                Debug.WriteLine(this.gm.baseAddress.ToString("X") + " + " + this.baseAddress.ToString("X") + " = " + address.ToString("X"));
+            long addressBefore;
             for (int i = 0; i < this.offsets.Length - 1; i++)
             {
                 addressBefore = address;
                 address = this.ReadAddress(address + this.offsets[i]);
-                Console.WriteLine("0x" + addressBefore.ToString("X") + " + " + "0x" + this.offsets[i].ToString("X") + " = " + "0x" + address.ToString("X"));
+                if (debug)
+                    Debug.WriteLine("0x" + addressBefore.ToString("X") + " + " + "0x" + this.offsets[i].ToString("X") + " = " + "0x" + address.ToString("X"));
             }
             addressBefore = address;
-            int offset = this.offsets[this.offsets.Length - 1];
-            address = address + offset;
-            Console.WriteLine("0x" + addressBefore.ToString("X") + " + " + "0x" + offset.ToString("X") + " = " + "0x" + address.ToString("X"));
+            int offset = this.offsets[offsets.Length - 1];
+            address += offset;
+            if (debug)
+                Debug.WriteLine("0x" + addressBefore.ToString("X") + " + " + "0x" + offset.ToString("X") + " = " + "0x" + address.ToString("X"));
             return address;
         }
 
-        public int ReadAddress(int memoryAddress)
+        public long ReadAddress(long memoryAddress)
         {
-            byte[] buffer = this.Read(memoryAddress);
-            int value = BitConverter.ToInt32(buffer, 0);
+            byte[] buffer = this.Read(memoryAddress, 16);
+            long value = BitConverter.ToInt64(buffer);
             return value;
         }
 
-        private byte[] Read(int memoryAddress)
+        private byte[] Read(long memoryAddress)
         {
             return this.Read(memoryAddress, 4);
         }
 
-        private byte[] Read(int memoryAddress, int bytes)
+        private byte[] Read(long memoryAddress, int bytes)
         {
-
+            if (this.gm.process.HasExited) throw new ProcessHasExitedException();
             int bytesRead = 0;
             byte[] buffer = new byte[bytes];
-            ReadProcessMemory(
-                this.gp.processHandle,
+            bool success = ReadProcessMemory(
+                this.gm.processHandle,
                 memoryAddress,
                 buffer,
                 buffer.Length,
                 ref bytesRead
             );
+            if (!success) throw new MemoryReadWriteException();
 
             return buffer;
         }
@@ -104,10 +86,15 @@ namespace LHGameHack
             byte[] buffer = this.Read(this.ToAddress());
             return BitConverter.ToInt32(buffer, 0);
         }
+        public long ReadInt64()
+        {
+            byte[] buffer = this.Read(this.ToAddress(), 16);
+            return BitConverter.ToInt64(buffer, 0);
+        }
 
         public byte[] ReadBytes(int bytes)
         {
-            return this.Read(this.ToAddress());
+            return this.Read(this.ToAddress(), bytes);
         }
 
         public byte[] ReadBytes()
@@ -126,10 +113,22 @@ namespace LHGameHack
             return intValue != 0;
         }
 
+        public void Write(long memoryAddress, byte[] value)
+        {
+            if (this.gm.process.HasExited) throw new ProcessHasExitedException();
+            bool success = WriteProcessMemory(this.gm.processHandle, memoryAddress, value, value.Length, 0); 
+            if (!success) throw new MemoryReadWriteException();
+        }
+
         public void WriteInt32(int value)
         {
             byte[] byteValue = BitConverter.GetBytes(value);
-            WriteProcessMemory(this.gp.processHandle, this.ToAddress(), byteValue, byteValue.Length, 0);
+            Write(this.ToAddress(), byteValue);
+        }
+        public void WriteFloat(float value)
+        {
+            byte[] byteValue = BitConverter.GetBytes(value);
+            Write(this.ToAddress(), byteValue);
         }
     }
 }
